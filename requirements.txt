@@ -1,0 +1,14 @@
+# 基础数值计算
+numpy>=1.24
+
+# 3D 几何与可视化（点云/网格、GUI、拾取）
+open3d>=0.18.0
+
+# GUI（部分实现可能需要；若你只用 Open3D GUI，也可保留不删）
+PySide6>=6.6.0
+
+# SciPy（如果你仍保留某些模块使用 SciPy 可留；若已完全移除也可删）
+scipy>=1.10
+
+# STEP 读取：pythonocc-core（Windows/Linux 通常可安装；macOS 可能受限）
+pythonocc-core>=7.7.2; platform_system!="Darwin"
