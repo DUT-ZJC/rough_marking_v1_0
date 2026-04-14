@@ -441,7 +441,7 @@ if __name__ == "__main__":
     # 替换为你自己电脑上的测试 STL 路径
     test_stl = input("请输入测试用的 STL 文件路径 (或直接回车使用默认路径): ").strip()
     if not test_stl:
-        test_stl = r"./data/2.stl"  # 填你常用的测试文件路径
+        test_stl = r"./data/1.stl"  # 填你常用的测试文件路径
         
     if not os.path.exists(test_stl):
         print(f"❌ 找不到文件: {test_stl}")
@@ -452,8 +452,8 @@ if __name__ == "__main__":
     try:
         # 1. 调用适配器提取数据
         # 这个架构允许以后随时切换新的策略，不需要改 Viewer 代码
-        planes, cyls, mask, mesh = MyAlgorithmAdapter.extract(test_stl)
-        """
+        #planes, cyls, mask, mesh = MyAlgorithmAdapter.extract(test_stl)
+    
         planes, cyls, mask, mesh = MyAlgorithmAdapter.extract(
             test_stl, 
             method="ransac",             # ✨ 必须改成你刚刚在注册表里起的名字！
@@ -461,8 +461,10 @@ if __name__ == "__main__":
             plane_dist_tol=1.0,        # ✨ 距离容差 (epsilon)：点到平面的最大允许距离(mm)
             plane_angle_deg=6.0,       # ✨ 角度容差：法向量允许的最大偏差角度
             plane_min_area=100.0,      # ✨ 面积阈值：太小的碎面片直接扔掉
+            cyl_selection_mode="dominant_cluster",
+            cyl_dominant_min_keep=8,
         )
-        """
+        
         print("提取成功！正在启动可视化界面...")
         # 2. 传入数据到 Viewer
         viewer = FeatureViewerApp(planes, cyls, mask, mesh)

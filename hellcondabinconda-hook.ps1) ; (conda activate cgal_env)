@@ -1,0 +1,308 @@
+warning: in the working copy of 'src/for_stl_feature/RANSAC_ITERATION_NOTES.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/for_stl_feature/extractor_cgal.py', LF will be replaced by CRLF the next time Git touches it
+[1mdiff --git a/src/for_stl_feature/RANSAC_ITERATION_NOTES.md b/src/for_stl_feature/RANSAC_ITERATION_NOTES.md[m
+[1mindex ab6a861..7c82c78 100644[m
+[1m--- a/src/for_stl_feature/RANSAC_ITERATION_NOTES.md[m
+[1m+++ b/src/for_stl_feature/RANSAC_ITERATION_NOTES.md[m
+[36m@@ -176,25 +176,36 @@[m
+ - 把相邻且共面的 plane feature 合并成一个更大 plane[m
+ [m
+ [m
+[31m-## 8. 如果要继续优化，下一步最应该做什么[m
+[32m+[m[32m## 8. 共面平面合并（plane merge）[m
+ [m
+[31m-下一步最值得加的是：[m
+[32m+[m[32m这一轮已经补上了基础版 `plane merge`，位置在：[m
+ [m
+[31m-## 共面平面合并（plane merge）[m
+[32m+[m[32m- `extractor_cgal.py`[m
+[32m+[m
+[32m+[m[32m当前做法是：[m
+[32m+[m
+[32m+[m[32m1. 所有 plane feature 提取完成后，再做最终 merge[m
+[32m+[m[32m2. 只有满足以下条件的 plane 才允许合并：[m
+[32m+[m[32m3. 法向夹角足够小[m
+[32m+[m[32m4. 两个平面的解析距离足够接近[m
+[32m+[m[32m5. 两个 patch 在网格上相邻，或者 AABB 间隔足够小[m
+[32m+[m[32m6. 合并后重新估计平面，误差仍然在阈值内[m
+[32m+[m[32m7. 如果合并后反而变成“不连通”，则回退，不强行合并[m
+ [m
+[31m-建议在所有平面都提取完之后，再做一轮 merge：[m
+[32m+[m[32m这样做的目的，是把：[m
+ [m
+[31m-合并条件可以设成：[m
+[32m+[m[32m- 本来属于同一大平面的相邻 patch[m
+ [m
+[31m-1. 两个 plane 的法向夹角很小[m
+[31m-2. 两个 plane 的 `d` 很接近[m
+[31m-3. 两个 patch 在网格上相邻，或者空间距离足够近[m
+[31m-4. 合并后重新估计平面，误差仍然小[m
+[32m+[m[32m重新并成一个 plane，同时尽量避免把：[m
+ [m
+[31m-这样做完以后，效果会更符合人工理解：[m
+[32m+[m[32m- 虽然方向接近，但实际不应该合并的 patch[m
+ [m
+[31m-- 本来属于同一大平面的 patch，会重新并成一个 plane[m
+[31m-- 真正不同的平面仍然保持分开[m
+[32m+[m[32m错误并在一起。[m
+[32m+[m
+[32m+[m[32m当前版本的 merge 是“保守 merge”：[m
+[32m+[m
+[32m+[m[32m- 优点：不会明显破坏前面已经修好的稳定性[m
+[32m+[m[32m- 缺点：还不是全局最优 merge，某些被细缝切开的共面区域，仍可能保持分开[m
+ [m
+ [m
+ ## 9. 这次迭代结论[m
+[36m@@ -209,8 +220,13 @@[m
+ 4. 增强平面覆盖率[m
+ 5. 提高结果稳定性[m
+ [m
+[31m-当前剩余最主要的问题不是“识别不到”，而是：[m
+[32m+[m[32m当前剩余最主要的问题不再是“完全没有共面合并”，而是：[m
+[32m+[m
+[32m+[m[32m- 现在已经有基础版 plane merge[m
+[32m+[m[32m- 但它仍然偏保守[m
+[32m+[m[32m- 某些复杂断裂情况下，同一大平面仍可能被拆成多个 feature[m
+ [m
+[31m-- 同一大平面有时会被拆成多个 plane feature[m
+[32m+[m[32m如果还要继续往前优化，下一步更适合做的是：[m
+ [m
+[31m-这个问题最合理的下一步，不是再继续盲调 RANSAC 参数，而是补“共面平面合并”。[m
+[32m+[m[32m- 更强的全局 plane merge[m
+[32m+[m[32m- 或者基于边界/缝隙语义的 plane stitching[m
+[1mdiff --git a/src/for_stl_feature/__pycache__/extractor_cgal.cpython-310.pyc b/src/for_stl_feature/__pycache__/extractor_cgal.cpython-310.pyc[m
+[1mindex 46a0cf5..5633a76 100644[m
+Binary files a/src/for_stl_feature/__pycache__/extractor_cgal.cpython-310.pyc and b/src/for_stl_feature/__pycache__/extractor_cgal.cpython-310.pyc differ
+[1mdiff --git a/src/for_stl_feature/extractor_cgal.py b/src/for_stl_feature/extractor_cgal.py[m
+[1mindex 14d7889..99313bf 100644[m
+[1m--- a/src/for_stl_feature/extractor_cgal.py[m
+[1m+++ b/src/for_stl_feature/extractor_cgal.py[m
+[36m@@ -248,6 +248,154 @@[m [mdef _grow_normal_region([m
+     return np.asarray(region, dtype=np.int32)[m
+ [m
+ [m
+[32m+[m[32mdef _aabb_gap(a_min: np.ndarray, a_max: np.ndarray, b_min: np.ndarray, b_max: np.ndarray) -> float:[m
+[32m+[m[32m    sep = np.maximum(0.0, np.maximum(a_min - b_max, b_min - a_max))[m
+[32m+[m[32m    return float(np.linalg.norm(sep))[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef _merge_coplanar_planes([m
+[32m+[m[32m    planes: list[ScanPlaneFeature],[m
+[32m+[m[32m    mesh: o3d.geometry.TriangleMesh,[m
+[32m+[m[32m    tri_centers: np.ndarray,[m
+[32m+[m[32m    tri_normals: np.ndarray,[m
+[32m+[m[32m    tri_areas: np.ndarray,[m
+[32m+[m[32m    adjacency: list[list[int]],[m
+[32m+[m[32m    angle_deg: float,[m
+[32m+[m[32m    dist_tol: float,[m
+[32m+[m[32m    gap_tol: float,[m
+[32m+[m[32m    p95_tol: float,[m
+[32m+[m[32m) -> list[ScanPlaneFeature]:[m
+[32m+[m[32m    if len(planes) <= 1:[m
+[32m+[m[32m        return planes[m
+[32m+[m
+[32m+[m[32m    cos_tol = float(np.cos(np.deg2rad(angle_deg)))[m
+[32m+[m[32m    tri_owner = -np.ones(len(tri_centers), dtype=np.int32)[m
+[32m+[m[32m    plane_bounds = [][m
+[32m+[m
+[32m+[m[32m    for plane_idx, plane in enumerate(planes):[m
+[32m+[m[32m        tri_idx = np.asarray(plane.tri_indices, dtype=np.int32)[m
+[32m+[m[32m        tri_owner[tri_idx] = plane_idx[m
+[32m+[m[32m        centers = tri_centers[tri_idx][m
+[32m+[m[32m        plane_bounds.append((centers.min(axis=0), centers.max(axis=0)))[m
+[32m+[m
+[32m+[m[32m    edge_neighbors = [set() for _ in planes][m
+[32m+[m[32m    for plane_idx, plane in enumerate(planes):[m
+[32m+[m[32m        for tri_id in np.asarray(plane.tri_indices, dtype=np.int32):[m
+[32m+[m[32m            for nb in adjacency[int(tri_id)]:[m
+[32m+[m[32m                other = int(tri_owner[nb])[m
+[32m+[m[32m                if other >= 0 and other != plane_idx:[m
+[32m+[m[32m                    edge_neighbors[plane_idx].add(other)[m
+[32m+[m
+[32m+[m[32m    parent = list(range(len(planes)))[m
+[32m+[m
+[32m+[m[32m    def find(x: int) -> int:[m
+[32m+[m[32m        while parent[x] != x:[m
+[32m+[m[32m            parent[x] = parent[parent[x]][m
+[32m+[m[32m            x = parent[x][m
+[32m+[m[32m        return x[m
+[32m+[m
+[32m+[m[32m    def union(a: int, b: int) -> None:[m
+[32m+[m[32m        ra = find(a)[m
+[32m+[m[32m        rb = find(b)[m
+[32m+[m[32m        if ra != rb:[m
+[32m+[m[32m            parent[rb] = ra[m
+[32m+[m
+[32m+[m[32m    for i in range(len(planes)):[m
+[32m+[m[32m        n1 = np.asarray(planes[i].normal, dtype=np.float64)[m
+[32m+[m[32m        d1 = float(planes[i].d)[m
+[32m+[m[32m        c1 = np.asarray(planes[i].centroid, dtype=np.float64)[m
+[32m+[m[32m        aabb_i = plane_bounds[i][m
+[32m+[m[32m        for j in range(i + 1, len(planes)):[m
+[32m+[m[32m            edge_adjacent = j in edge_neighbors[i] or i in edge_neighbors[j][m
+[32m+[m[32m            aabb_j = plane_bounds[j][m
+[32m+[m[32m            if not edge_adjacent and _aabb_gap(aabb_i[0], aabb_i[1], aabb_j[0], aabb_j[1]) > gap_tol:[m
+[32m+[m[32m                continue[m
+[32m+[m
+[32m+[m[32m            n2 = np.asarray(planes[j].normal, dtype=np.float64)[m
+[32m+[m[32m            d2 = float(planes[j].d)[m
+[32m+[m[32m            c2 = np.asarray(planes[j].centroid, dtype=np.float64)[m
+[32m+[m[32m            dot = float(np.dot(n1, n2))[m
+[32m+[m[32m            if abs(dot) < cos_tol:[m
+[32m+[m[32m                continue[m
+[32m+[m[32m            if dot < 0.0:[m
+[32m+[m[32m                n2 = -n2[m
+[32m+[m[32m                d2 = -d2[m
+[32m+[m
+[32m+[m[32m            if abs(float(c1 @ n2 + d2)) > dist_tol:[m
+[32m+[m[32m                continue[m
+[32m+[m[32m            if abs(float(c2 @ n1 + d1)) > dist_tol:[m
+[32m+[m[32m                continue[m
+[32m+[m
+[32m+[m[32m            union(i, j)[m
+[32m+[m
+[32m+[m[32m    groups: dict[int, list[int]] = {}[m
+[32m+[m[32m    for idx in range(len(planes)):[m
+[32m+[m[32m        groups.setdefault(find(idx), []).append(idx)[m
+[32m+[m
+[32m+[m[32m    merged_planes: list[ScanPlaneFeature] = [][m
+[32m+[m[32m    for members in groups.values():[m
+[32m+[m[32m        if len(members) == 1:[m
+[32m+[m[32m            merged_planes.append(planes[members[0]])[m
+[32m+[m[32m            continue[m
+[32m+[m
+[32m+[m[32m        tri_idx = np.unique([m
+[32m+[m[32m            np.concatenate([np.asarray(planes[m].tri_indices, dtype=np.int32) for m in members])[m
+[32m+[m[32m        ).astype(np.int32)[m
+[32m+[m[32m        merge_mask = np.zeros(len(tri_centers), dtype=bool)[m
+[32m+[m[32m        merge_mask[tri_idx] = True[m
+[32m+[m[32m        if len(_split_triangle_components(merge_mask, adjacency)) != 1:[m
+[32m+[m[32m            for m in members:[m
+[32m+[m[32m                merged_planes.append(planes[m])[m
+[32m+[m[32m            continue[m
+[32m+[m
+[32m+[m[32m        fallback_normal = _mean_component_normal([m
+[32m+[m[32m            tri_normals=tri_normals,[m
+[32m+[m[32m            tri_areas=tri_areas,[m
+[32m+[m[32m            comp=tri_idx,[m
+[32m+[m[32m        )[m
+[32m+[m[32m        fit_n, fit_d, centroid, rmse, p95 = _estimate_plane_from_component([m
+[32m+[m[32m            tri_centers=tri_centers,[m
+[32m+[m[32m            tri_normals=tri_normals,[m
+[32m+[m[32m            tri_areas=tri_areas,[m
+[32m+[m[32m            comp=tri_idx,[m
+[32m+[m[32m            fallback_normal=fallback_normal,[m
+[32m+[m[32m        )[m
+[32m+[m[32m        if p95 > p95_tol:[m
+[32m+[m[32m            for m in members:[m
+[32m+[m[32m                merged_planes.append(planes[m])[m
+[32m+[m[32m            continue[m
+[32m+[m
+[32m+[m[32m        sub_mesh = _submesh_from_triangles(mesh, tri_idx)[m
+[32m+[m[32m        merged_planes.append([m
+[32m+[m[32m            ScanPlaneFeature([m
+[32m+[m[32m                id=-1,[m
+[32m+[m[32m                tri_indices=tri_idx,[m
+[32m+[m[32m                mesh=sub_mesh,[m
+[32m+[m[32m                normal=fit_n.astype(np.float64),[m
+[32m+[m[32m                d=float(fit_d),[m
+[32m+[m[32m                centroid=centroid.astype(np.float64),[m
+[32m+[m[32m                area=float(tri_areas[tri_idx].sum()),[m
+[32m+[m[32m                rmse=float(rmse),[m
+[32m+[m[32m            )[m
+[32m+[m[32m        )[m
+[32m+[m
+[32m+[m[32m    return merged_planes[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef _reindex_features([m
+[32m+[m[32m    planes: list[ScanPlaneFeature],[m
+[32m+[m[32m    cyls: list[ScanCylinderFeature],[m
+[32m+[m[32m) -> tuple[list[ScanPlaneFeature], list[ScanCylinderFeature]]:[m
+[32m+[m[32m    next_id = 0[m
+[32m+[m[32m    for plane in planes:[m
+[32m+[m[32m        plane.id = next_id[m
+[32m+[m[32m        next_id += 1[m
+[32m+[m[32m    for cyl in cyls:[m
+[32m+[m[32m        cyl.id = next_id[m
+[32m+[m[32m        next_id += 1[m
+[32m+[m[32m    return planes, cyls[m
+[32m+[m
+[32m+[m
+ class CGALExtractor(BaseFeatureExtractor):[m
+     """[m
+     Mesh-aware wrapper around the CGAL Efficient RANSAC backend.[m
+[36m@@ -277,6 +425,10 @@[m [mclass CGALExtractor(BaseFeatureExtractor):[m
+         plane_expand_angle_deg = float(kwargs.get("plane_expand_angle_deg", plane_angle_deg + 2.0))[m
+         plane_recover_angle_deg = float(kwargs.get("plane_recover_angle_deg", plane_angle_deg + 2.0))[m
+         plane_recover_min_triangles = int(kwargs.get("plane_recover_min_triangles", max(plane_min_triangles, 30)))[m
+[32m+[m[32m        plane_merge_angle_deg = float(kwargs.get("plane_merge_angle_deg", max(plane_angle_deg * 0.5, 2.0)))[m
+[32m+[m[32m        plane_merge_dist_tol = float(kwargs.get("plane_merge_dist_tol", max(plane_p95_tol * 1.2, 0.6)))[m
+[32m+[m[32m        plane_merge_gap_tol = float(kwargs.get("plane_merge_gap_tol", max(epsilon * 2.0, resolution * 3.0)))[m
+[32m+[m[32m        plane_merge_p95_tol = float(kwargs.get("plane_merge_p95_tol", max(plane_p95_tol * 1.2, epsilon)))[m
+ [m
+         cyl_min_area = float(kwargs.get("cyl_min_area", 80.0))[m
+         cyl_min_triangles = int(kwargs.get("cyl_min_triangles", 30))[m
+[36m@@ -508,6 +660,19 @@[m [mclass CGALExtractor(BaseFeatureExtractor):[m
+             recover_available[region] = False[m
+             shape_id += 1[m
+ [m
+[32m+[m[32m        planes = _merge_coplanar_planes([m
+[32m+[m[32m            planes=planes,[m
+[32m+[m[32m            mesh=mesh,[m
+[32m+[m[32m            tri_centers=tri_centers,[m
+[32m+[m[32m            tri_normals=tri_normals,[m
+[32m+[m[32m            tri_areas=tri_areas,[m
+[32m+[m[32m            adjacency=adjacency,[m
+[32m+[m[32m            angle_deg=plane_merge_angle_deg,[m
+[32m+[m[32m            dist_tol=plane_merge_dist_tol,[m
+[32m+[m[32m            gap_tol=plane_merge_gap_tol,[m
+[32m+[m[32m            p95_tol=plane_merge_p95_tol,[m
+[32m+[m[32m        )[m
+[32m+[m
+         cyl_proposals = _sorted_shape_proposals(c_cyls_idx, c_cyls_param)[m
+         for _, _, param in cyl_proposals:[m
+             axis_origin = np.asarray(param[0:3], dtype=np.float64)[m
+[36m@@ -602,4 +767,18 @@[m [mclass CGALExtractor(BaseFeatureExtractor):[m
+                 remaining_mask[comp] = False[m
+                 shape_id += 1[m
+ [m
+[32m+[m[32m        planes = _merge_coplanar_planes([m
+[32m+[m[32m            planes=planes,[m
+[32m+[m[32m            mesh=mesh,[m
+[32m+[m[32m            tri_centers=tri_centers,[m
+[32m+[m[32m            tri_normals=tri_normals,[m
+[32m+[m[32m            tri_areas=tri_areas,[m
+[32m+[m[32m            adjacency=adjacency,[m
+[32m+[m[32m            angle_deg=plane_merge_angle_deg,[m
+[32m+[m[32m            dist_tol=plane_merge_dist_tol,[m
+[32m+[m[32m            gap_tol=plane_merge_gap_tol,[m
+[32m+[m[32m            p95_tol=plane_merge_p95_tol,[m
+[32m+[m[32m        )[m
+[32m+[m[32m        planes, cyls = _reindex_features(planes, cyls)[m
+[32m+[m
+         return planes, cyls, remaining_mask, mesh[m
+[1mdiff --git a/src/for_stl_feature/view.py b/src/for_stl_feature/view.py[m
+[1mindex da8048d..e094f92 100644[m
+[1m--- a/src/for_stl_feature/view.py[m
+[1m+++ b/src/for_stl_feature/view.py[m
+[36m@@ -452,8 +452,8 @@[m [mif __name__ == "__main__":[m
+     try:[m
+         # 1. 调用适配器提取数据[m
+         # 这个架构允许以后随时切换新的策略，不需要改 Viewer 代码[m
+[31m-        planes, cyls, mask, mesh = MyAlgorithmAdapter.extract(test_stl)[m
+[31m-        """[m
+[32m+[m[32m        #planes, cyls, mask, mesh = MyAlgorithmAdapter.extract(test_stl)[m
+[32m+[m[41m        [m
+         planes, cyls, mask, mesh = MyAlgorithmAdapter.extract([m
+             test_stl, [m
+             method="ransac",             # ✨ 必须改成你刚刚在注册表里起的名字！[m
+[36m@@ -462,7 +462,7 @@[m [mif __name__ == "__main__":[m
+             plane_angle_deg=6.0,       # ✨ 角度容差：法向量允许的最大偏差角度[m
+             plane_min_area=100.0,      # ✨ 面积阈值：太小的碎面片直接扔掉[m
+         )[m
+[31m-        """[m
+[32m+[m[41m        [m
+         print("提取成功！正在启动可视化界面...")[m
+         # 2. 传入数据到 Viewer[m
+         viewer = FeatureViewerApp(planes, cyls, mask, mesh)[m

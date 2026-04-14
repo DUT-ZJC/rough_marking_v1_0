@@ -28,6 +28,54 @@ def _unit(v: np.ndarray) -> np.ndarray:
     return v / (np.linalg.norm(v) + 1e-12)
 
 
+def _subsample_rows(X: np.ndarray, max_rows: int = 48) -> np.ndarray:
+    X = np.asarray(X, dtype=np.float64)
+    if len(X) <= max_rows:
+        return X
+    idx = np.linspace(0, len(X) - 1, max_rows).astype(np.int32)
+    return X[idx]
+
+
+def _pairwise_direction(vectors: np.ndarray, fallback: np.ndarray | None = None) -> np.ndarray:
+    vectors = np.asarray(vectors, dtype=np.float64)
+    accum = np.zeros(3, dtype=np.float64)
+    for i in range(len(vectors)):
+        vi = vectors[i]
+        n_vi = np.linalg.norm(vi)
+        if n_vi < 1e-12:
+            continue
+        vi = vi / n_vi
+        for j in range(i + 1, len(vectors)):
+            vj = vectors[j]
+            n_vj = np.linalg.norm(vj)
+            if n_vj < 1e-12:
+                continue
+            vj = vj / n_vj
+            cp = np.cross(vi, vj)
+            n_cp = np.linalg.norm(cp)
+            if n_cp < 1e-8:
+                continue
+            cp = cp / n_cp
+            if np.linalg.norm(accum) > 1e-12 and float(np.dot(cp, accum)) < 0.0:
+                cp = -cp
+            accum += cp * n_cp
+
+    if np.linalg.norm(accum) > 1e-12:
+        return _unit(accum)
+
+    if fallback is not None and np.linalg.norm(fallback) > 1e-12:
+        return _unit(fallback)
+
+    if len(vectors) >= 2:
+        ref = vectors[0]
+        for other in vectors[1:]:
+            cp = np.cross(ref, other)
+            if np.linalg.norm(cp) > 1e-8:
+                return _unit(cp)
+
+    return np.array([0.0, 0.0, 1.0], dtype=np.float64)
+
+
 def _triangle_areas_and_centroids(V: np.ndarray, F: np.ndarray):
     p0 = V[F[:, 0]]
     p1 = V[F[:, 1]]
@@ -107,10 +155,8 @@ def _submesh_from_triangles(mesh: o3d.geometry.TriangleMesh, tri_idx: np.ndarray
 def _fit_plane_from_points(P: np.ndarray):
     c = P.mean(axis=0)
     X = P - c
-    C = X.T @ X
-    w, v = np.linalg.eigh(C)
-    n = v[:, 0]
-    n = _unit(n)
+    Xs = _subsample_rows(X, max_rows=32)
+    n = _pairwise_direction(Xs)
     d = -float(n @ c)
     dist = (P @ n + d)
     rmse = float(np.sqrt(np.mean(dist ** 2)))
@@ -197,13 +243,43 @@ def _axis_from_normals(normals: np.ndarray, weights: np.ndarray | None = None) -
     """
     if weights is None:
         weights = np.ones(len(normals), dtype=np.float64)
-    M = np.zeros((3, 3), dtype=np.float64)
-    for n, w in zip(normals, weights):
-        n = _unit(n)
-        M += w * np.outer(n, n)
-    wv, vv = np.linalg.eigh(M)
-    v = vv[:, 0]
-    return _unit(v)
+    normals = np.asarray(normals, dtype=np.float64)
+    weights = np.asarray(weights, dtype=np.float64)
+
+    if len(normals) == 0:
+        return np.array([0.0, 0.0, 1.0], dtype=np.float64)
+
+    idx = np.linspace(0, len(normals) - 1, min(len(normals), 48)).astype(np.int32)
+    ns = normals[idx]
+    ws = weights[idx]
+
+    accum = np.zeros(3, dtype=np.float64)
+    for i in range(len(ns)):
+        ni = _unit(ns[i])
+        for j in range(i + 1, len(ns)):
+            nj = _unit(ns[j])
+            cp = np.cross(ni, nj)
+            n_cp = np.linalg.norm(cp)
+            if n_cp < 1e-8:
+                continue
+            cp = cp / n_cp
+            w = ws[i] * ws[j] * n_cp
+            if np.linalg.norm(accum) > 1e-12 and float(np.dot(cp, accum)) < 0.0:
+                cp = -cp
+            accum += w * cp
+
+    if np.linalg.norm(accum) > 1e-12:
+        return _unit(accum)
+
+    mean_n = _unit((ns * ws[:, None]).sum(axis=0))
+    ref = np.array([1.0, 0.0, 0.0], dtype=np.float64)
+    if abs(float(np.dot(mean_n, ref))) > 0.9:
+        ref = np.array([0.0, 1.0, 0.0], dtype=np.float64)
+    return _unit(np.cross(mean_n, ref))
+
+
+def _cross2(a: np.ndarray, b: np.ndarray) -> float:
+    return float(a[0] * b[1] - a[1] * b[0])
 
 
 def _fit_circle_2d(xy: np.ndarray):
@@ -211,16 +287,50 @@ def _fit_circle_2d(xy: np.ndarray):
     Simple algebraic circle fit (Kasa). Good enough for MVP.
     returns center (2,), radius, rmse
     """
-    x = xy[:, 0]
-    y = xy[:, 1]
-    A = np.stack([2*x, 2*y, np.ones_like(x)], axis=1)
-    b = x*x + y*y
-    sol, *_ = np.linalg.lstsq(A, b, rcond=None)
-    cx, cy, c = sol
-    r = np.sqrt(max(1e-12, c + cx*cx + cy*cy))
-    d = np.sqrt((x - cx)**2 + (y - cy)**2) - r
-    rmse = float(np.sqrt(np.mean(d**2)))
-    return np.array([cx, cy], dtype=np.float64), float(r), rmse
+    xy = np.asarray(xy, dtype=np.float64)
+    if len(xy) == 0:
+        return np.zeros(2, dtype=np.float64), 0.0, np.inf
+    if len(xy) < 3:
+        c = np.mean(xy, axis=0)
+        d = np.linalg.norm(xy - c[None, :], axis=1)
+        r = float(np.mean(d))
+        rmse = float(np.sqrt(np.mean((d - r) ** 2)))
+        return c.astype(np.float64), r, rmse
+
+    pts = _subsample_rows(xy, max_rows=24)
+    centers = []
+    weights = []
+    n_pts = len(pts)
+    for i in range(n_pts - 2):
+        p1 = pts[i]
+        for j in range(i + 1, n_pts - 1):
+            p2 = pts[j]
+            for k in range(j + 1, n_pts):
+                p3 = pts[k]
+                det = 2.0 * (
+                    p1[0] * (p2[1] - p3[1])
+                    + p2[0] * (p3[1] - p1[1])
+                    + p3[0] * (p1[1] - p2[1])
+                )
+                if abs(det) < 1e-8:
+                    continue
+                s1 = p1[0] * p1[0] + p1[1] * p1[1]
+                s2 = p2[0] * p2[0] + p2[1] * p2[1]
+                s3 = p3[0] * p3[0] + p3[1] * p3[1]
+                cx = (s1 * (p2[1] - p3[1]) + s2 * (p3[1] - p1[1]) + s3 * (p1[1] - p2[1])) / det
+                cy = (s1 * (p3[0] - p2[0]) + s2 * (p1[0] - p3[0]) + s3 * (p2[0] - p1[0])) / det
+                centers.append([cx, cy])
+                weights.append(abs(det))
+
+    if centers:
+        c = np.average(np.asarray(centers, dtype=np.float64), axis=0, weights=np.asarray(weights, dtype=np.float64))
+    else:
+        c = np.mean(pts, axis=0)
+
+    d = np.linalg.norm(xy - c[None, :], axis=1)
+    r = float(np.mean(d))
+    rmse = float(np.sqrt(np.mean((d - r) ** 2)))
+    return c.astype(np.float64), r, rmse
 
 
 def _fit_cylinder_from_region(mesh: o3d.geometry.TriangleMesh, tri_idx: np.ndarray):
