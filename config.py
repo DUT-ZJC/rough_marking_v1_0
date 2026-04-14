@@ -1,7 +1,7 @@
 # ====== User editable paths ======
 CAD_STEP_PATH = r"./data/2_orginal.step"  # STEP file of ideal model
 SCAN_STL_PATH = r"./data/2.stl"           # STL triangle mesh of scanned rough part
-SCAN_FEATURE_BACKEND = "step_guided"      # "stl" | "step_guided"
+SCAN_FEATURE_BACKEND = "step_guided"      # legacy "stl" backend removed
 
 # ====== Processing params ======
 VOXEL_SIZE = 2.0            # mm-like unit if your data is in mm

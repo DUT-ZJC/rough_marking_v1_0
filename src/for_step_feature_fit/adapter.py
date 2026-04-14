@@ -1,9 +1,9 @@
 """Compatibility adapter for feeding STEP-guided scan features into the main app.
 
-The main program expects scan-side features in the legacy
-`ScanPlaneFeature` / `ScanCylinderFeature` format. This adapter runs the
-STEP-guided fitting pipeline, keeps only plane and cylinder results, and
-converts them into the structures already consumed by the picker and optimizer.
+The main program expects scan-side plane/cylinder features in a shared
+application format. This adapter runs the STEP-guided fitting pipeline, keeps
+only plane and cylinder results, and converts them into the structures already
+consumed by the picker and optimizer.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import numpy as np
 import open3d as o3d
 
 from ..logging_utils import log
-from ..for_stl_feature.core_types import ScanCylinderFeature, ScanPlaneFeature
+from ..scan_feature_types import ScanCylinderFeature, ScanPlaneFeature
 from .core_types import FitThresholds, RegistrationConfig, FaceFitResult
 from .pipeline import StepSTLFitSession
 

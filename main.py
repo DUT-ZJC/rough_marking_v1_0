@@ -5,7 +5,6 @@ import numpy as np
 import config
 from src.logging_utils import log, validate_feature_triangles
 
-from src.for_stl_feature.stl_extractor import process_scan_features
 from src.for_step_feature_fit import (
     FitThresholds as StepFitThresholds,
     RegistrationConfig as StepFitRegistrationConfig,
@@ -60,38 +59,34 @@ def main():
         raise RuntimeError("No analytic plane/cylinder features found in STEP.")
     
     # 毛坯特征提取
-    backend = str(getattr(config, "SCAN_FEATURE_BACKEND", "stl")).strip().lower()
-    if backend == "step_guided":
-        log("Using STEP-guided scan feature backend.")
-        scan_planes_m, scan_cyls_m, remaining_mask, scan_mesh = process_scan_features_step_guided(
-            step_path=cad_step,
-            scan_stl_path=scan_stl,
-            linear_deflection=float(getattr(config, "STEP_GUIDED_LINEAR_DEFLECTION", 0.5)),
-            thresholds=StepFitThresholds(
-                support_gap_mm=float(getattr(config, "STEP_GUIDED_SUPPORT_GAP_MM", 2.0)),
-                plane_tol_mm=float(getattr(config, "STEP_GUIDED_PLANE_TOL_MM", 1.0)),
-                cylinder_tol_mm=float(getattr(config, "STEP_GUIDED_CYLINDER_TOL_MM", 1.0)),
-                generic_tol_mm=float(getattr(config, "STEP_GUIDED_GENERIC_TOL_MM", 1.5)),
-                min_support_triangles=int(getattr(config, "STEP_GUIDED_MIN_SUPPORT_TRIANGLES", 20)),
-            ),
-            registration_config=StepFitRegistrationConfig(
-                VOXEL_SIZE=float(getattr(config, "VOXEL_SIZE", 2.0)),
-                NORMAL_RADIUS=float(getattr(config, "NORMAL_RADIUS", 6.0)),
-                COARSE_ENCLOSE_ENABLE=bool(getattr(config, "COARSE_ENCLOSE_ENABLE", True)),
-                COARSE_ENCLOSE_MARGIN=float(getattr(config, "COARSE_ENCLOSE_MARGIN", 0.0)),
-                COARSE_ENCLOSE_SAMPLE_POINTS=int(getattr(config, "COARSE_ENCLOSE_SAMPLE_POINTS", 12000)),
-                COARSE_ENCLOSE_MAX_ITERS=int(getattr(config, "COARSE_ENCLOSE_MAX_ITERS", 8)),
-            ),
-            use_global_results=bool(getattr(config, "STEP_GUIDED_USE_GLOBAL_RESULTS", True)),
-        )
-    elif backend == "stl":
-        log("Using legacy STL-only scan feature backend.")
-        scan_planes_m, scan_cyls_m, remaining_mask, scan_mesh = process_scan_features(scan_stl)
-    else:
+    backend = str(getattr(config, "SCAN_FEATURE_BACKEND", "step_guided")).strip().lower()
+    if backend not in {"", "step_guided"}:
         raise ValueError(
             f"Unsupported SCAN_FEATURE_BACKEND={backend!r}. "
-            "Use 'stl' or 'step_guided'."
+            "Only 'step_guided' is supported now."
         )
+    log("Using STEP-guided scan feature backend.")
+    scan_planes_m, scan_cyls_m, remaining_mask, scan_mesh = process_scan_features_step_guided(
+        step_path=cad_step,
+        scan_stl_path=scan_stl,
+        linear_deflection=float(getattr(config, "STEP_GUIDED_LINEAR_DEFLECTION", 0.5)),
+        thresholds=StepFitThresholds(
+            support_gap_mm=float(getattr(config, "STEP_GUIDED_SUPPORT_GAP_MM", 2.0)),
+            plane_tol_mm=float(getattr(config, "STEP_GUIDED_PLANE_TOL_MM", 1.0)),
+            cylinder_tol_mm=float(getattr(config, "STEP_GUIDED_CYLINDER_TOL_MM", 1.0)),
+            generic_tol_mm=float(getattr(config, "STEP_GUIDED_GENERIC_TOL_MM", 1.5)),
+            min_support_triangles=int(getattr(config, "STEP_GUIDED_MIN_SUPPORT_TRIANGLES", 20)),
+        ),
+        registration_config=StepFitRegistrationConfig(
+            VOXEL_SIZE=float(getattr(config, "VOXEL_SIZE", 2.0)),
+            NORMAL_RADIUS=float(getattr(config, "NORMAL_RADIUS", 6.0)),
+            COARSE_ENCLOSE_ENABLE=bool(getattr(config, "COARSE_ENCLOSE_ENABLE", True)),
+            COARSE_ENCLOSE_MARGIN=float(getattr(config, "COARSE_ENCLOSE_MARGIN", 0.0)),
+            COARSE_ENCLOSE_SAMPLE_POINTS=int(getattr(config, "COARSE_ENCLOSE_SAMPLE_POINTS", 12000)),
+            COARSE_ENCLOSE_MAX_ITERS=int(getattr(config, "COARSE_ENCLOSE_MAX_ITERS", 8)),
+        ),
+        use_global_results=bool(getattr(config, "STEP_GUIDED_USE_GLOBAL_RESULTS", True)),
+    )
 
 
     #获取特征的三角面片id的集合

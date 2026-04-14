@@ -2,7 +2,7 @@
 
 ## 1. 目标
 
-`src/for_step_feature_fit` 是一套独立于 `src/for_stl_feature` 的新流程。
+`src/for_step_feature_fit` 是当前主用的扫描特征拟合流程。
 
 它不再从 STL 三角片里“猜哪里像平面、哪里像柱面”，而是走下面这条路线：
 
